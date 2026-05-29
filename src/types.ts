@@ -41,10 +41,33 @@ export type RateLimitDecision = {
  * Returns may be sync (in-memory store) or async (Redis/Postgres). The
  * library threads sync/async through the type system so the hot path stays
  * sync when the store does.
+ *
+ * `cost` (default `1`) lets callers charge a request as more than one
+ * "unit." A bulk-import route might cost 10; an `OPTIONS` preflight might
+ * cost 0.5 if you want to deprioritize it; a free-tier admin call can be
+ * `cost: 0` to bypass entirely without showing up as a skip.
  */
 export type Algorithm = {
 	/** Per-call probe + commit. Returns the decision. */
-	check: (store: Store, key: string, now: number) => RateLimitDecision | Promise<RateLimitDecision>;
+	check: (
+		store: Store,
+		key: string,
+		now: number,
+		cost?: number,
+	) => RateLimitDecision | Promise<RateLimitDecision>;
+	/**
+	 * Read-only inspection — current decision *as if* a cost-0 request just
+	 * arrived. Useful for status pages and quota displays. Never mutates
+	 * the store entry's value (the algorithm may still touch the entry's
+	 * TTL — that's harmless).
+	 */
+	peek: (
+		store: Store,
+		key: string,
+		now: number,
+	) => RateLimitDecision | Promise<RateLimitDecision>;
+	/** Clear a key's state (admin-style). Equivalent to `store.delete?.(key)`. */
+	reset: (store: Store, key: string) => void | Promise<void>;
 	/** TTL the store should retain a key's state. Algorithm-dependent. */
 	keyTtlMs: number;
 	/** Policy descriptor — surfaced on `RateLimitDecision.policy`. */

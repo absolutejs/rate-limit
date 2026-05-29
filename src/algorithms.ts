@@ -70,44 +70,73 @@ export const gcra = (options: GcraOptions): Algorithm => {
 	// Keep a key's state for one tolerance window past sustained period to avoid stale TAT issues.
 	const keyTtlMs = periodMs + Math.ceil(Number(tolerance / ONE_MS_NS));
 
-	const check = (store: Store, key: string, now: number) => {
+	type State = { tat: string };
+
+	const settleGcra = (storedTat: bigint, nowNs: bigint, allowed: boolean): RateLimitDecision => {
+		const gap = storedTat > nowNs ? storedTat - nowNs : 0n;
+		const used = Number(gap / emissionInterval);
+		const remaining = Math.max(0, limit - used);
+		let retryAfterSec = 0;
+		if (!allowed) {
+			const waitNs = gap - tolerance;
+			retryAfterSec = waitNs > 0n
+				? Math.max(1, Math.ceil(Number(waitNs) / 1_000_000_000))
+				: 1;
+		}
+		let resetSec = 0;
+		if (gap > 0n) resetSec = Math.ceil(Number(gap / ONE_SEC_NS));
+		return { allowed, limit, policy, remaining, resetSec, retryAfterSec };
+	};
+
+	const check = (store: Store, key: string, now: number, cost: number = 1) => {
+		if (cost < 0) throw new Error('gcra.check: cost must be >= 0');
 		const nowNs = BigInt(now) * ONE_MS_NS;
-		type State = { tat: string };
 		let allowed = false;
+		const increment = BigInt(Math.round(cost * 1_000_000)) * emissionInterval / ONE_MS_NS;
 		const ret = store.update<State>(key, keyTtlMs, (prev) => {
 			const lastTat = prev !== null ? BigInt(prev.tat) : 0n;
-			// Conform test runs against the OLD TAT (the classic GCRA formulation —
-			// "did this arrival come early enough to fit under the tolerance ceiling").
+			// Conform check is against the OLD TAT — independent of cost. If you
+			// would have been allowed even one emission, your cost-N goes through
+			// and overdraws your future capacity by `(cost - 1) * T`. This matches
+			// the natural "we let you over the limit, you wait it off" semantic.
+			if (cost === 0) {
+				allowed = true;
+				return { tat: lastTat.toString() };
+			}
 			allowed = lastTat - tolerance <= nowNs;
 			if (allowed) {
-				const newTat = (lastTat > nowNs ? lastTat : nowNs) + emissionInterval;
-				return { tat: newTat.toString() };
+				const projectedTat = (lastTat > nowNs ? lastTat : nowNs) + increment;
+				return { tat: projectedTat.toString() };
 			}
 			return { tat: lastTat.toString() };
 		});
 
-		const settle = (state: State): RateLimitDecision => {
-			const storedTat = BigInt(state.tat);
-			const gap = storedTat > nowNs ? storedTat - nowNs : 0n;
-			const used = Number(gap / emissionInterval);
-			const remaining = Math.max(0, limit - used);
-			let retryAfterSec = 0;
-			if (!allowed) {
-				const waitNs = gap - tolerance;
-				retryAfterSec = waitNs > 0n
-					? Math.max(1, Math.ceil(Number(waitNs) / 1_000_000_000))
-					: 1;
-			}
-			let resetSec = 0;
-			if (gap > 0n) resetSec = Math.ceil(Number(gap / ONE_SEC_NS));
-			return { allowed, limit, policy, remaining, resetSec, retryAfterSec };
-		};
-
+		const settle = (state: State) => settleGcra(BigInt(state.tat), nowNs, allowed);
 		if (ret instanceof Promise) return ret.then(settle);
 		return settle(ret);
 	};
 
-	return { check, keyTtlMs, limit, policy };
+	const peek = (store: Store, key: string, now: number) => {
+		const nowNs = BigInt(now) * ONE_MS_NS;
+		const ret = store.update<State>(key, keyTtlMs, (prev) =>
+			prev ?? { tat: '0' });
+		const settle = (state: State) => {
+			const storedTat = BigInt(state.tat);
+			const allowedNow = storedTat - tolerance <= nowNs;
+			return settleGcra(storedTat, nowNs, allowedNow);
+		};
+		if (ret instanceof Promise) return ret.then(settle);
+		return settle(ret);
+	};
+
+	const reset = (store: Store, key: string) => {
+		if (store.delete) {
+			const result = store.delete(key);
+			if (result instanceof Promise) return result;
+		}
+	};
+
+	return { check, keyTtlMs, limit, peek, policy, reset };
 };
 
 // -----------------------------------------------------------------------------
@@ -138,39 +167,66 @@ export const tokenBucket = (options: TokenBucketOptions): Algorithm => {
 	const fullRefillMs = refillPerSecond > 0 ? Math.ceil((capacity / refillPerSecond) * 1000) : 3_600_000;
 	const keyTtlMs = fullRefillMs + 5_000;
 
-	const check = (store: Store, key: string, now: number) => {
-		type State = { tokens: number; lastRefillAt: number };
+	type TbState = { tokens: number; lastRefillAt: number };
+
+	const settleTb = (state: TbState, allowed: boolean): RateLimitDecision => {
+		const remaining = Math.max(0, Math.floor(state.tokens));
+		const retryAfterSec = allowed
+			? 0
+			: refillPerSecond > 0
+				? Math.max(1, Math.ceil((1 - state.tokens) / refillPerSecond))
+				: 0;
+		const resetSec = refillPerSecond > 0
+			? Math.ceil((capacity - state.tokens) / refillPerSecond)
+			: 0;
+		return { allowed, limit: capacity, policy, remaining, resetSec, retryAfterSec };
+	};
+
+	const check = (store: Store, key: string, now: number, cost: number = 1) => {
+		if (cost < 0) throw new Error('tokenBucket.check: cost must be >= 0');
 		let allowed = false;
-		const ret = store.update<State>(key, keyTtlMs, (prev) => {
+		const ret = store.update<TbState>(key, keyTtlMs, (prev) => {
 			const start = prev ?? { lastRefillAt: now, tokens: capacity };
 			const elapsedMs = Math.max(0, now - start.lastRefillAt);
 			const refilled = Math.min(capacity, start.tokens + (elapsedMs / 1000) * refillPerSecond);
-			if (refilled >= 1) {
+			if (cost === 0) {
 				allowed = true;
-				return { lastRefillAt: now, tokens: refilled - 1 };
+				return { lastRefillAt: now, tokens: refilled };
+			}
+			if (refilled >= cost) {
+				allowed = true;
+				return { lastRefillAt: now, tokens: refilled - cost };
 			}
 			allowed = false;
 			return { lastRefillAt: now, tokens: refilled };
 		});
 
-		const settle = (state: State): RateLimitDecision => {
-			const remaining = Math.max(0, Math.floor(state.tokens));
-			const retryAfterSec = allowed
-				? 0
-				: refillPerSecond > 0
-					? Math.max(1, Math.ceil((1 - state.tokens) / refillPerSecond))
-					: 0;
-			const resetSec = refillPerSecond > 0
-				? Math.ceil((capacity - state.tokens) / refillPerSecond)
-				: 0;
-			return { allowed, limit: capacity, policy, remaining, resetSec, retryAfterSec };
-		};
-
+		const settle = (state: TbState) => settleTb(state, allowed);
 		if (ret instanceof Promise) return ret.then(settle);
 		return settle(ret);
 	};
 
-	return { check, keyTtlMs, limit: capacity, policy };
+	const peek = (store: Store, key: string, now: number) => {
+		const ret = store.update<TbState>(key, keyTtlMs, (prev) =>
+			prev ?? { lastRefillAt: now, tokens: capacity });
+		const settle = (state: TbState) => {
+			const elapsedMs = Math.max(0, now - state.lastRefillAt);
+			const refilled = Math.min(capacity, state.tokens + (elapsedMs / 1000) * refillPerSecond);
+			const projected = { ...state, tokens: refilled };
+			return settleTb(projected, refilled >= 1);
+		};
+		if (ret instanceof Promise) return ret.then(settle);
+		return settle(ret);
+	};
+
+	const reset = (store: Store, key: string) => {
+		if (store.delete) {
+			const result = store.delete(key);
+			if (result instanceof Promise) return result;
+		}
+	};
+
+	return { check, keyTtlMs, limit: capacity, peek, policy, reset };
 };
 
 // -----------------------------------------------------------------------------
@@ -202,60 +258,88 @@ export const slidingWindow = (options: SlidingWindowOptions): Algorithm => {
 	const keyTtlMs = periodMs * 2 + 1000;
 	const limit = requestsPerPeriod;
 
-	const check = (store: Store, key: string, now: number) => {
-		type State = {
-			currentCount: number;
-			currentStartMs: number;
-			prevCount: number;
-		};
+	type SwState = {
+		currentCount: number;
+		currentStartMs: number;
+		prevCount: number;
+	};
 
+	const rollWindow = (prev: SwState | null, now: number): SwState => {
+		const start = prev ?? { currentCount: 0, currentStartMs: now, prevCount: 0 };
+		let { currentCount, currentStartMs, prevCount } = start;
+		const elapsed = now - currentStartMs;
+		if (elapsed >= 2 * periodMs) {
+			prevCount = 0;
+			currentCount = 0;
+			currentStartMs = now;
+		} else if (elapsed >= periodMs) {
+			prevCount = currentCount;
+			currentCount = 0;
+			currentStartMs += periodMs;
+		}
+		return { currentCount, currentStartMs, prevCount };
+	};
+
+	const estimateAt = (state: SwState, now: number): number => {
+		const elapsedInCurrent = now - state.currentStartMs;
+		const weight = 1 - elapsedInCurrent / periodMs;
+		return state.currentCount + state.prevCount * Math.max(0, weight);
+	};
+
+	const check = (store: Store, key: string, now: number, cost: number = 1) => {
+		if (cost < 0) throw new Error('slidingWindow.check: cost must be >= 0');
 		let estimate = 0;
-		const ret = store.update<State>(key, keyTtlMs, (prev) => {
-			const start = prev ?? {
-				currentCount: 0,
-				currentStartMs: now,
-				prevCount: 0,
-			};
-			let { currentCount, currentStartMs, prevCount } = start;
-			const elapsed = now - currentStartMs;
-			if (elapsed >= 2 * periodMs) {
-				// Both windows are stale.
-				prevCount = 0;
-				currentCount = 0;
-				currentStartMs = now;
-			} else if (elapsed >= periodMs) {
-				// Roll the window: previous becomes the just-elapsed window.
-				prevCount = currentCount;
-				currentCount = 0;
-				currentStartMs += periodMs;
+		let allowed = false;
+		const ret = store.update<SwState>(key, keyTtlMs, (prev) => {
+			const rolled = rollWindow(prev, now);
+			estimate = estimateAt(rolled, now);
+			if (cost === 0) {
+				allowed = true;
+				return rolled;
 			}
-			const elapsedInCurrent = now - currentStartMs;
-			const weight = 1 - elapsedInCurrent / periodMs;
-			estimate = currentCount + prevCount * Math.max(0, weight);
-			const allowed = estimate < requestsPerPeriod;
-			if (allowed) currentCount += 1;
-			return { currentCount, currentStartMs, prevCount };
+			allowed = estimate + cost <= requestsPerPeriod;
+			if (allowed) rolled.currentCount += cost;
+			return rolled;
 		});
 
-		const settle = (state: State): RateLimitDecision => {
-			const allowed = estimate < requestsPerPeriod;
-			const remaining = Math.max(0, Math.floor(requestsPerPeriod - estimate - (allowed ? 1 : 0)));
+		const settle = (state: SwState): RateLimitDecision => {
+			const remaining = Math.max(0, Math.floor(requestsPerPeriod - estimate - (allowed ? cost : 0)));
 			const elapsedInCurrent = now - state.currentStartMs;
 			const resetSec = Math.ceil(Math.max(0, periodMs - elapsedInCurrent) / 1000);
 			const retryAfterSec = allowed ? 0 : Math.max(1, resetSec);
-			return {
-				allowed,
-				limit: requestsPerPeriod,
-				policy,
-				remaining,
-				resetSec,
-				retryAfterSec,
-			};
+			return { allowed, limit: requestsPerPeriod, policy, remaining, resetSec, retryAfterSec };
 		};
 
 		if (ret instanceof Promise) return ret.then(settle);
 		return settle(ret);
 	};
 
-	return { check, keyTtlMs, limit, policy };
+	const peek = (store: Store, key: string, now: number) => {
+		const ret = store.update<SwState>(key, keyTtlMs, (prev) => rollWindow(prev, now));
+		const settle = (state: SwState) => {
+			const estimate = estimateAt(state, now);
+			const remaining = Math.max(0, Math.floor(requestsPerPeriod - estimate));
+			const elapsedInCurrent = now - state.currentStartMs;
+			const resetSec = Math.ceil(Math.max(0, periodMs - elapsedInCurrent) / 1000);
+			return {
+				allowed: estimate < requestsPerPeriod,
+				limit: requestsPerPeriod,
+				policy,
+				remaining,
+				resetSec,
+				retryAfterSec: 0,
+			};
+		};
+		if (ret instanceof Promise) return ret.then(settle);
+		return settle(ret);
+	};
+
+	const reset = (store: Store, key: string) => {
+		if (store.delete) {
+			const result = store.delete(key);
+			if (result instanceof Promise) return result;
+		}
+	};
+
+	return { check, keyTtlMs, limit, peek, policy, reset };
 };

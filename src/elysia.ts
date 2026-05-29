@@ -26,13 +26,28 @@ export type RateLimitOptions = {
 	algorithm: Algorithm;
 	store?: Store;
 	/**
+	 * Namespace prefix prepended to every store key the plugin writes.
+	 * Default the plugin's Elysia name (`'@absolutejs/rate-limit'`). When
+	 * mounting two `rateLimit()` plugins against the same `Store` instance,
+	 * set distinct `namespace` strings on each to prevent cross-plugin key
+	 * collisions.
+	 */
+	namespace?: string;
+	/**
 	 * How to derive the per-request rate-limit key. `'ip'` (default) uses
 	 * `extractIp` with the `trustedProxies` / `ipv6Prefix` options below.
 	 * `'authorization'` uses the `Authorization` header (good for an
-	 * authenticated API where IPs aren't stable).  Or pass a function for
+	 * authenticated API where IPs aren't stable). Or pass a function for
 	 * any custom shape.
 	 */
 	key?: KeyResolver;
+	/**
+	 * Cost of the current request in algorithm units. Default `1` per
+	 * request. Use this to charge expensive endpoints more (e.g. a bulk
+	 * upload that should consume 10× the budget) or to free-list specific
+	 * routes (`cost: 0`).
+	 */
+	cost?: number | ((ctx: RateLimitContext) => number);
 	/**
 	 * Number of trusted proxies in front of the app for IP extraction. Only
 	 * relevant when `key === 'ip'`. Default `0` (don't trust XFF).
@@ -62,6 +77,12 @@ export type RateLimitOptions = {
 	 * to be sent verbatim, or `false` to fall back to the default.
 	 */
 	onLimit?: (ctx: RateLimitContext, info: LimitInfo) => Response | false | Promise<Response | false>;
+	/**
+	 * Hook fired on every allowed request, AFTER headers are set. Symmetric
+	 * with `onLimit` but only fires when the request was let through. Useful
+	 * for billing-event emission, per-tenant counters, or audit logs.
+	 */
+	onAllow?: (ctx: RateLimitContext, info: LimitInfo) => void | Promise<void>;
 	/** Override `Date.now` for tests. */
 	clock?: () => number;
 };
@@ -99,8 +120,14 @@ export const rateLimit = (options: RateLimitOptions) => {
 	);
 	const skip = options.skip;
 	const onLimit = options.onLimit;
+	const onAllow = options.onAllow;
+	const namespace = options.namespace ?? '@absolutejs/rate-limit';
+	const fixedCost: number = typeof options.cost === 'number' ? options.cost : 1;
+	const costOf: (ctx: RateLimitContext) => number = typeof options.cost === 'function'
+		? options.cost
+		: () => fixedCost;
 
-	return new Elysia({ name: '@absolutejs/rate-limit' }).onRequest(
+	return new Elysia({ name: namespace }).onRequest(
 		async ({ request, server, set }) => {
 			const rlCtx: RateLimitContext = {
 				request,
@@ -108,15 +135,26 @@ export const rateLimit = (options: RateLimitOptions) => {
 			};
 			if (skip && skip(rlCtx)) return;
 
-			const key = keyOf(rlCtx);
-			const decisionRet = options.algorithm.check(store, key, clock());
+			const key = `${namespace}:${keyOf(rlCtx)}`;
+			const cost = costOf(rlCtx);
+			const decisionRet = options.algorithm.check(store, key, clock(), cost);
 			const decision = decisionRet instanceof Promise ? await decisionRet : decisionRet;
 			const headers = formatHeaders(decision, headerMode);
 			for (const [name, value] of Object.entries(headers)) {
 				set.headers[name] = value;
 			}
 
-			if (decision.allowed) return;
+			if (decision.allowed) {
+				if (onAllow) {
+					const ret = onAllow(rlCtx, { decision, key });
+					if (ret instanceof Promise) {
+						ret.catch((error) => {
+							console.error('[rate-limit] onAllow rejected:', error);
+						});
+					}
+				}
+				return;
+			}
 
 			if (onLimit) {
 				const custom = await onLimit(rlCtx, { decision, key });

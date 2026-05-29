@@ -1,5 +1,38 @@
 # @absolutejs/rate-limit changelog
 
+## 0.1.0 — 2026-05-29
+
+Same-day deepening pass. Fully backwards-compatible — all existing call
+sites continue to work; new surface is purely additive.
+
+### Added
+
+- **Multi-cost requests.** `algorithm.check(store, key, now, cost?)` now
+  accepts an optional `cost` (default 1). The plugin option `cost: number |
+  (ctx) => number` makes per-request cost a function of context — heavy
+  endpoints can charge more, free-tier endpoints can charge 0. Semantics:
+  if you'd be allowed at all, your cost-N goes through and overdraws future
+  capacity (you "wait it off" — same as Stripe's metered approach).
+- **`algorithm.peek(store, key, now)`** — read-only inspection. Returns the
+  current decision *as if* a cost-0 request just arrived. Use this for
+  status pages, quota displays, and "you have N requests left" surfaces
+  without consuming a token.
+- **`algorithm.reset(store, key)`** — clear a key's state. Admin tooling
+  for "this customer is locked out by mistake; reset their bucket."
+- **`combined({ algorithms: [a, b] })`** — composes multiple algorithms
+  into one that passes only when every component passes. Standard stacked
+  shape: "100/minute per IP **AND** 10000/day per user-id" in a single
+  `rateLimit()` plugin. The composed `policy` carries every component's
+  descriptor; the composed `limit` is the tightest. Auto-namespaces keys
+  per component to avoid collision in a shared store.
+- **Plugin `namespace` option.** All store keys are prefixed with the
+  namespace. Default = the plugin's Elysia name. Mount two `rateLimit()`
+  plugins against the same `Store` instance with distinct namespaces and
+  their keys never collide.
+- **Plugin `onAllow` hook.** Symmetric with `onLimit` — fires on every
+  allowed request, after headers are set. Useful for billing-event
+  emission, per-tenant counters, or audit logs.
+
 ## 0.0.1 — 2026-05-29
 
 Initial release.
