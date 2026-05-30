@@ -1,5 +1,31 @@
 # @absolutejs/rate-limit changelog
 
+## 0.3.0 — 2026-05-30
+
+### Added — OpenTelemetry tracing via @absolutejs/telemetry (Elysia plugin)
+
+Closes G2 (deep-research audit) for rate-limit. OTel is wired at the
+Elysia plugin layer rather than every `algorithm.check` — the
+non-Elysia core surface (`gcra(...)`, `tokenBucket(...)`,
+`slidingWindow(...)`, `Store`) stays unchanged for callers using
+rate-limit outside HTTP.
+
+- **`RateLimitOptions.tracerProvider?: TracerProvider`** — any
+  `@opentelemetry/api`-compatible. Structural type via
+  `@absolutejs/telemetry`; no peer-dep on `@opentelemetry/api`.
+- **`ratelimit.check` span** per gated request. Attributes:
+  `abs.tenant` (the resolved key — IP, auth, custom resolver),
+  `ratelimit.cost`, `ratelimit.allowed`, `ratelimit.remaining`,
+  `ratelimit.retry_after_sec` (when blocked).
+- Status OK on allow; ERROR on rate-limited.
+- `@absolutejs/telemetry` added as a regular dep.
+- Zero-cost when `tracerProvider` is omitted.
+
+4 new tests in `tests/tracing.test.ts`: allow / rate-limited / noop
+fallback / custom cost.
+
+Test count: 64 → 68.
+
 ## 0.2.0 — 2026-05-29
 
 Substrate-pattern uniformity. Backwards-compatible — `Store.metrics?`

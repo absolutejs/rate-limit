@@ -4,6 +4,11 @@
  */
 
 import { Elysia } from 'elysia';
+import {
+	ABS_ATTRS,
+	tracerOrNoop,
+	type TracerProvider
+} from '@absolutejs/telemetry';
 import type { Algorithm, RateLimitDecision, Store } from './types';
 import { memoryStore } from './stores';
 import { extractIp } from './ip';
@@ -85,6 +90,18 @@ export type RateLimitOptions = {
 	onAllow?: (ctx: RateLimitContext, info: LimitInfo) => void | Promise<void>;
 	/** Override `Date.now` for tests. */
 	clock?: () => number;
+	/**
+	 * Optional OpenTelemetry tracer provider. When set, every limit
+	 * check emits a `ratelimit.check` span with `abs.tenant` (the
+	 * resolved key) and decision attributes. When omitted, all tracing
+	 * is a zero-allocation noop. Added in 0.3.0.
+	 *
+	 * Structural type via `@absolutejs/telemetry`; no peer-dep on
+	 * `@opentelemetry/api`. The non-Elysia core (`algorithm.check`,
+	 * `Store`) is intentionally NOT wrapped — the plugin layer is
+	 * where rate-limit decisions become observable to a customer SRE.
+	 */
+	tracerProvider?: TracerProvider;
 };
 
 const defaultKeyResolvers = (
@@ -126,6 +143,8 @@ export const rateLimit = (options: RateLimitOptions) => {
 	const costOf: (ctx: RateLimitContext) => number = typeof options.cost === 'function'
 		? options.cost
 		: () => fixedCost;
+	// 0.3.0: OTel tracer (noop when options.tracerProvider unset).
+	const tracer = tracerOrNoop(options.tracerProvider, '@absolutejs/rate-limit');
 
 	return new Elysia({ name: namespace }).onRequest(
 		async ({ request, server, set }) => {
@@ -137,33 +156,52 @@ export const rateLimit = (options: RateLimitOptions) => {
 
 			const key = `${namespace}:${keyOf(rlCtx)}`;
 			const cost = costOf(rlCtx);
-			const decisionRet = options.algorithm.check(store, key, clock(), cost);
-			const decision = decisionRet instanceof Promise ? await decisionRet : decisionRet;
-			const headers = formatHeaders(decision, headerMode);
-			for (const [name, value] of Object.entries(headers)) {
-				set.headers[name] = value;
-			}
-
-			if (decision.allowed) {
-				if (onAllow) {
-					const ret = onAllow(rlCtx, { decision, key });
-					if (ret instanceof Promise) {
-						ret.catch((error) => {
-							console.error('[rate-limit] onAllow rejected:', error);
-						});
-					}
+			// 0.3.0: span the limit check. abs.tenant carries the
+			// resolved key (IP, auth, or custom). On decision we add
+			// allowed + remaining + retryAfter.
+			const span = tracer.startSpan('ratelimit.check', {
+				attributes: {
+					[ABS_ATTRS.tenant]: key,
+					'ratelimit.cost': cost
 				}
-				return;
-			}
-
-			if (onLimit) {
-				const custom = await onLimit(rlCtx, { decision, key });
-				if (custom !== false) return custom;
-			}
-			return new Response('Too Many Requests', {
-				headers: { 'Content-Type': 'text/plain', ...headers },
-				status: 429,
 			});
+			try {
+				const decisionRet = options.algorithm.check(store, key, clock(), cost);
+				const decision = decisionRet instanceof Promise ? await decisionRet : decisionRet;
+				span.setAttribute('ratelimit.allowed', decision.allowed);
+				span.setAttribute('ratelimit.remaining', decision.remaining);
+				if (!decision.allowed) {
+					span.setAttribute('ratelimit.retry_after_sec', decision.retryAfterSec);
+				}
+				span.setStatus({ code: decision.allowed ? 1 /* OK */ : 2 /* ERROR */ });
+				const headers = formatHeaders(decision, headerMode);
+				for (const [name, value] of Object.entries(headers)) {
+					set.headers[name] = value;
+				}
+
+				if (decision.allowed) {
+					if (onAllow) {
+						const ret = onAllow(rlCtx, { decision, key });
+						if (ret instanceof Promise) {
+							ret.catch((error) => {
+								console.error('[rate-limit] onAllow rejected:', error);
+							});
+						}
+					}
+					return;
+				}
+
+				if (onLimit) {
+					const custom = await onLimit(rlCtx, { decision, key });
+					if (custom !== false) return custom;
+				}
+				return new Response('Too Many Requests', {
+					headers: { 'Content-Type': 'text/plain', ...headers },
+					status: 429,
+				});
+			} finally {
+				span.end();
+			}
 		},
 	);
 };

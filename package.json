@@ -1,6 +1,6 @@
 {
   "name": "@absolutejs/rate-limit",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "First-class 2026 rate limit for Bun + Elysia. GCRA by default (exact, O(1) memory per key, no boundary effect — the algorithm Stripe uses), IETF draft-09 RateLimit-* headers, IPv6 /64 grouping, X-Forwarded-For trust modes, BigInt nanosecond TAT, pluggable store (memory LRU bundled).",
   "repository": {
     "type": "git",
@@ -33,6 +33,9 @@
     "check:package": "bun run typecheck && bun run build && bun run test",
     "release": "bun run format && bun run check:package && bun publish"
   },
+  "dependencies": {
+    "@absolutejs/telemetry": "^0.0.2"
+  },
   "peerDependencies": {
     "bun-types": "^1.3.14",
     "elysia": ">= 1.0.0"
@@ -43,6 +46,7 @@
     }
   },
   "devDependencies": {
+    "@absolutejs/telemetry": "^0.0.2",
     "@types/bun": "^1.3.14",
     "elysia": "^1.4.28",
     "prettier": "^3.8.3",
