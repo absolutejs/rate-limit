@@ -1,6 +1,6 @@
 {
   "name": "@absolutejs/rate-limit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "First-class 2026 rate limit for Bun + Elysia. GCRA by default (exact, O(1) memory per key, no boundary effect — the algorithm Stripe uses), IETF draft-09 RateLimit-* headers, IPv6 /64 grouping, X-Forwarded-For trust modes, BigInt nanosecond TAT, pluggable store (memory LRU bundled).",
   "repository": {
     "type": "git",

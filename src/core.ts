@@ -4,7 +4,12 @@
  * limiting, queue-consumer throttling, AI-call throttling).
  */
 
-export type { Algorithm, RateLimitDecision, Store } from './types';
+export type {
+	Algorithm,
+	RateLimitDecision,
+	Store,
+	StoreMetrics
+} from './types';
 export {
 	gcra,
 	slidingWindow,

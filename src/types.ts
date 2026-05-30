@@ -93,4 +93,34 @@ export type Store = {
 	delete?: (key: string) => void | Promise<void>;
 	/** Drop all keys. Useful for tests. */
 	clear?: () => void | Promise<void>;
+	/**
+	 * Optional — operator-shaped point-in-time + cumulative store
+	 * counters. `memoryStore` implements this; remote stores
+	 * (Redis/Postgres) may or may not, depending on whether their
+	 * backend exposes the equivalent (Redis can via INFO, PG via
+	 * pg_stat_user_tables — both implementations may defer it).
+	 *
+	 * Added in 0.2.0.
+	 */
+	metrics?: () => StoreMetrics;
+};
+
+/**
+ * Returned by {@link Store.metrics}. The `size` field is point-in-time;
+ * the rest are cumulative since store creation. Added in 0.2.0.
+ *
+ * - `size` — current number of un-evicted entries.
+ * - `updates` — total `update()` calls. Equal to the number of
+ *   algorithm decisions made through this store.
+ * - `evictions` — keys dropped by the LRU when `maxKeys` was reached.
+ *   A non-zero, climbing value means the store is undersized for the
+ *   tenant key cardinality and old keys are losing state mid-window.
+ * - `deletes` — explicit `delete()` calls. Useful for noticing if a
+ *   stuck-key cleanup script is firing more than expected.
+ */
+export type StoreMetrics = {
+	size: number;
+	updates: number;
+	evictions: number;
+	deletes: number;
 };

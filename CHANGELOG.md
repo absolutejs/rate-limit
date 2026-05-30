@@ -1,5 +1,26 @@
 # @absolutejs/rate-limit changelog
 
+## 0.2.0 — 2026-05-29
+
+Substrate-pattern uniformity. Backwards-compatible — `Store.metrics?`
+is optional on the interface; existing `Store` implementations keep
+satisfying it.
+
+### Added
+
+- **`Store.metrics?()`** returning `StoreMetrics` —
+  `{ size, updates, evictions, deletes }`. `size` is point-in-time;
+  the rest are cumulative since store creation. `memoryStore`
+  implements the surface; remote stores (Redis/Postgres) may defer it
+  to a future release if their backend exposes equivalent counters
+  natively.
+- The operator-facing signal: a non-zero, climbing `evictions` means
+  the store is undersized for the tenant key cardinality (old keys
+  losing rate-limit state mid-window) — used to require external
+  Map-instrumentation; now reads off the store itself.
+
+6 new tests in `tests/storeMetrics.test.ts`. Test count: 58 → 64.
+
 ## 0.1.0 — 2026-05-29
 
 Same-day deepening pass. Fully backwards-compatible — all existing call

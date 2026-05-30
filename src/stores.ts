@@ -9,7 +9,7 @@
  * looked up anyway, at which point we discard them in O(1).
  */
 
-import type { Store } from './types';
+import type { Store, StoreMetrics } from './types';
 
 export type MemoryStoreOptions = {
 	/**
@@ -38,19 +38,36 @@ export const memoryStore = (options: MemoryStoreOptions = {}): Store => {
 	const clock = options.clock ?? Date.now;
 	// JS Map preserves insertion order — re-set on touch gets LRU ordering for free.
 	const map = new Map<string, Entry<unknown>>();
+	// 0.2.0: cumulative operator counters.
+	let updates = 0;
+	let evictions = 0;
+	let deletes = 0;
 
 	const evictIfNeeded = () => {
 		while (map.size > maxKeys) {
 			const oldestKey = map.keys().next().value;
 			if (oldestKey === undefined) break;
 			map.delete(oldestKey);
+			evictions += 1;
 		}
 	};
 
 	return {
-		clear: () => { map.clear(); },
-		delete: (key) => { map.delete(key); },
+		clear: () => {
+			deletes += map.size;
+			map.clear();
+		},
+		delete: (key) => {
+			if (map.delete(key)) deletes += 1;
+		},
+		metrics: (): StoreMetrics => ({
+			deletes,
+			evictions,
+			size: map.size,
+			updates
+		}),
 		update: <T,>(key: string, ttlMs: number, fn: (prev: T | null) => T): T => {
+			updates += 1;
 			const now = clock();
 			const ttl = ttlMs > 0 ? ttlMs : defaultTtl;
 			const existing = map.get(key) as Entry<T> | undefined;
