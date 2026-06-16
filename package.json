@@ -6,6 +6,10 @@
     "type": "git",
     "url": "git+https://github.com/absolutejs/rate-limit.git"
   },
+  "homepage": "https://github.com/absolutejs/rate-limit",
+  "bugs": {
+    "url": "https://github.com/absolutejs/rate-limit/issues"
+  },
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
