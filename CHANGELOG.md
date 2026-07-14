@@ -1,5 +1,16 @@
 # @absolutejs/rate-limit changelog
 
+## 0.3.2 — 2026-07-14
+
+### Fixed
+
+- Align the runtime dependency on `@absolutejs/telemetry` with the current
+  `^0.1.1` contract and remove its redundant development declaration. The
+  former `^0.0.2` range installed a
+  second, structurally incompatible telemetry generation in current hosts,
+  preventing `RateLimitOptions.tracerProvider` from accepting their provider.
+  Runtime behavior and the public rate-limit API are unchanged.
+
 ## 0.3.0 — 2026-05-30
 
 ### Added — OpenTelemetry tracing via @absolutejs/telemetry (Elysia plugin)
