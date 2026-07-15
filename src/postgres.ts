@@ -80,8 +80,9 @@ export const postgresStore = (options: PostgresStoreOptions): PostgresStore => {
             "SELECT value FROM $TABLE WHERE key = $1 AND expires_at > NOW()",
           ),
           [key],
-        )) as Array<{ value: Value }>;
-        const next = updateValue(rows[0]?.value ?? null);
+        )) as Array<{ value: string }>;
+        const previous = rows[0] ? (JSON.parse(rows[0].value) as Value) : null;
+        const next = updateValue(previous);
         await transaction.unsafe(
           query(
             `INSERT INTO $TABLE (key, value, expires_at, updated_at)

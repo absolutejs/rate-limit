@@ -20,14 +20,16 @@ describe("postgresStore", () => {
     );
     const first = postgresStore({ sql: firstSql, table });
     const second = postgresStore({ sql: secondSql, table });
-    const algorithm = slidingWindow({ periodMs: 60_000, requestsPerPeriod: 1 });
+    const algorithm = slidingWindow({ periodMs: 60_000, requestsPerPeriod: 3 });
 
     try {
       const decisions = await Promise.all([
         algorithm.check(first, "shared-key", Date.now()),
         algorithm.check(second, "shared-key", Date.now()),
+        algorithm.check(first, "shared-key", Date.now()),
+        algorithm.check(second, "shared-key", Date.now()),
       ]);
-      expect(decisions.filter(({ allowed }) => allowed)).toHaveLength(1);
+      expect(decisions.filter(({ allowed }) => allowed)).toHaveLength(3);
       expect(decisions.filter(({ allowed }) => !allowed)).toHaveLength(1);
 
       await firstSql.unsafe(

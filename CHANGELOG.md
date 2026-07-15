@@ -1,5 +1,12 @@
 # @absolutejs/rate-limit changelog
 
+## 0.4.2 — 2026-07-15
+
+### Fixed
+
+- Decode Bun SQL's JSONB text result before invoking the store update callback,
+  so follow-up updates receive the persisted state instead of encoded JSON.
+
 ## 0.4.1 — 2026-07-15
 
 ### Fixed
@@ -84,12 +91,12 @@ sites continue to work; new surface is purely additive.
 
 - **Multi-cost requests.** `algorithm.check(store, key, now, cost?)` now
   accepts an optional `cost` (default 1). The plugin option `cost: number |
-  (ctx) => number` makes per-request cost a function of context — heavy
+(ctx) => number` makes per-request cost a function of context — heavy
   endpoints can charge more, free-tier endpoints can charge 0. Semantics:
   if you'd be allowed at all, your cost-N goes through and overdraws future
   capacity (you "wait it off" — same as Stripe's metered approach).
 - **`algorithm.peek(store, key, now)`** — read-only inspection. Returns the
-  current decision *as if* a cost-0 request just arrived. Use this for
+  current decision _as if_ a cost-0 request just arrived. Use this for
   status pages, quota displays, and "you have N requests left" surfaces
   without consuming a token.
 - **`algorithm.reset(store, key)`** — clear a key's state. Admin tooling
