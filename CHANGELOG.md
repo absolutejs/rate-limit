@@ -1,5 +1,15 @@
 # @absolutejs/rate-limit changelog
 
+## 0.4.0 — 2026-07-15
+
+### Added
+
+- Add `postgresStore` under `@absolutejs/rate-limit/postgres` for durable,
+  atomic cross-replica limits. Per-key transaction advisory locks protect both
+  existing rows and first-write races; application-owned tables keep schema
+  migration policy explicit. The adapter also exposes active-entry metrics and
+  bounded expired-row pruning for operator maintenance.
+
 ## 0.3.2 — 2026-07-14
 
 ### Fixed

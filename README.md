@@ -90,9 +90,26 @@ type Store = {
 ```
 
 Implement `update` atomically (read-modify-write); the rest is optional. For
-Bun in-process: `memoryStore()`. For multi-replica Bun deployments: Redis
-with a Lua script for GCRA atomicity (sibling package, `@absolutejs/rate-limit-redis`,
-ships later).
+Bun in-process use `memoryStore()`. Multi-replica Bun services backed by
+PostgreSQL can use the bundled durable adapter:
+
+```ts
+import { SQL } from 'bun';
+import { postgresStore } from '@absolutejs/rate-limit/postgres';
+
+const store = postgresStore({
+  sql: new SQL(process.env.DATABASE_URL),
+  table: 'absolute_rate_limit_entries',
+});
+```
+
+The application owns the table migration. It requires `key text PRIMARY KEY`,
+`value jsonb NOT NULL`, `expires_at timestamp NOT NULL`, and
+`updated_at timestamp NOT NULL`. Per-key PostgreSQL transaction advisory locks
+linearize updates across replicas, including the first update before a row
+exists. Expired rows are replaced lazily on their next update;
+`activeEntries()` reports current cardinality and `pruneExpired()` provides a
+bounded operator cleanup primitive for abandoned keys.
 
 ## Algorithm picker
 
