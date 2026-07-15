@@ -1,5 +1,12 @@
 # @absolutejs/rate-limit changelog
 
+## 0.4.1 — 2026-07-15
+
+### Fixed
+
+- Declare the Postgres adapter's implemented `delete()` method as required on
+  `PostgresStore`, so cleanup callers do not need optional chaining.
+
 ## 0.4.0 — 2026-07-15
 
 ### Added

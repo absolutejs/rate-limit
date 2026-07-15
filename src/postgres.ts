@@ -11,6 +11,7 @@ export type PostgresStoreOptions = {
 
 export type PostgresStore = Store & {
   activeEntries: () => Promise<number>;
+  delete: NonNullable<Store["delete"]>;
   pruneExpired: (limit?: number) => Promise<number>;
 };
 
