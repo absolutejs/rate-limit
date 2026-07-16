@@ -8,8 +8,14 @@ const databaseTest = process.env.DATABASE_URL ? test : test.skip;
 describe("postgresStore", () => {
   databaseTest("linearizes concurrent replicas and honors expiry", async () => {
     const table = `rate_limit_test_${crypto.randomUUID().replaceAll("-", "")}`;
-    const firstSql = new SQL(process.env.DATABASE_URL!);
-    const secondSql = new SQL(process.env.DATABASE_URL!);
+    const firstSql = new SQL({
+      prepare: false,
+      url: process.env.DATABASE_URL!,
+    });
+    const secondSql = new SQL({
+      prepare: false,
+      url: process.env.DATABASE_URL!,
+    });
     await firstSql.unsafe(
       `CREATE TABLE ${table} (
 				key text PRIMARY KEY,

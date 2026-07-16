@@ -80,8 +80,14 @@ export const postgresStore = (options: PostgresStoreOptions): PostgresStore => {
             "SELECT value FROM $TABLE WHERE key = $1 AND expires_at > NOW()",
           ),
           [key],
-        )) as Array<{ value: string }>;
-        const previous = rows[0] ? (JSON.parse(rows[0].value) as Value) : null;
+        )) as Array<{ value: unknown }>;
+        const stored = rows[0]?.value;
+        const previous =
+          stored === undefined
+            ? null
+            : typeof stored === "string"
+              ? (JSON.parse(stored) as Value)
+              : (stored as Value);
         const next = updateValue(previous);
         await transaction.unsafe(
           query(
