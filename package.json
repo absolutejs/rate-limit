@@ -1,6 +1,6 @@
 {
   "name": "@absolutejs/rate-limit",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "description": "First-class 2026 rate limit for Bun + Elysia. GCRA by default (exact, O(1) memory per key, no boundary effect — the algorithm Stripe uses), IETF draft-09 RateLimit-* headers, IPv6 /64 grouping, X-Forwarded-For trust modes, BigInt nanosecond TAT, pluggable store (memory LRU bundled).",
   "repository": {
     "type": "git",
@@ -17,7 +17,7 @@
   "license": "BSL-1.1",
   "author": "Alex Kahn",
   "absolutejs": {
-    "manifestContract": 1
+    "manifestContract": 2
   },
   "publishConfig": {
     "access": "public"
@@ -41,7 +41,7 @@
     "release": "bun run format && bun run check:package && bun publish"
   },
   "dependencies": {
-    "@absolutejs/manifest": "^0.1.0",
+    "@absolutejs/manifest": "^0.4.0",
     "@absolutejs/telemetry": "^0.1.1",
     "@sinclair/typebox": "^0.34.0"
   },

@@ -26,7 +26,7 @@ const IPV6_MAX_PREFIX = 128;
  * `skip`, `onLimit`, `onAllow`, `clock`, `tracerProvider` are
  * function-valued → wiring concerns. */
 export const manifest = defineManifest<RateLimitOptions, RateLimitRuntime>()({
-	contract: 1,
+	contract: 2,
 	identity: {
 		accent: '#ef4444',
 		category: 'infrastructure',
@@ -250,6 +250,13 @@ export const manifest = defineManifest<RateLimitOptions, RateLimitRuntime>()({
 	tools: {
 		check_rate_limit: tool.runtime({
 			annotations: { readOnlyHint: true },
+			authorization: {
+				approval: 'never',
+				audience: 'admin',
+				effects: ['read'],
+				requiredScopes: ['rate-limit:read'],
+				resource: { idField: 'key', type: 'rate-limit-key' }
+			},
 			description:
 				"Inspect one visitor's current rate-limit state (allowed, remaining, reset) without spending any budget. `key` is the full store key including the namespace prefix, e.g. '@absolutejs/rate-limit:203.0.113.9'.",
 			handler: async ({ key }, { algorithm, store }) =>
@@ -258,6 +265,12 @@ export const manifest = defineManifest<RateLimitOptions, RateLimitRuntime>()({
 		}),
 		limiter_stats: tool.runtime({
 			annotations: { readOnlyHint: true },
+			authorization: {
+				approval: 'never',
+				audience: 'admin',
+				effects: ['read'],
+				requiredScopes: ['rate-limit:read']
+			},
 			description:
 				'Counter-store statistics: tracked keys, total decisions, LRU evictions, deletes. Climbing evictions mean the store is undersized.',
 			handler: (_input, { store }) =>
@@ -268,6 +281,15 @@ export const manifest = defineManifest<RateLimitOptions, RateLimitRuntime>()({
 		}),
 		reset_rate_limit: tool.runtime({
 			annotations: { destructiveHint: true, idempotentHint: true },
+			authorization: {
+				approval: 'always',
+				audience: 'admin',
+				effects: ['delete'],
+				idempotency: { mode: 'resource' },
+				requiredScopes: ['rate-limit:reset'],
+				resource: { idField: 'key', type: 'rate-limit-key' },
+				reversible: false
+			},
 			description:
 				"Clear one visitor's rate-limit state so they get a fresh budget. `key` is the full store key including the namespace prefix.",
 			handler: async ({ key }, { algorithm, store }) => {
