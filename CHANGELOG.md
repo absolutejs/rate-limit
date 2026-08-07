@@ -1,5 +1,9 @@
 # @absolutejs/rate-limit changelog
 
+## 0.5.2 — 2026-08-07
+
+- Accepts the shared `@absolutejs/telemetry` 0.3 runtime line.
+
 ## 0.4.2 — 2026-07-15
 
 ### Fixed
