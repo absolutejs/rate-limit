@@ -127,3 +127,5 @@ bounded operator cleanup primitive for abandoned keys.
 ## License
 
 BSL 1.1 with a named carveout for the hosted rate-limit / WAF / API gateway throttling category (Cloudflare WAF + Rate Limiting, AWS WAF + API Gateway throttling, Kong, Tyk, Imperva, Akamai, GCP Cloud Armor, Azure Front Door rate-limiting, Upstash Ratelimit, Stripe's API gateway throttling). See [LICENSE](./LICENSE). Change Date: 4 years from first release; Change License: Apache 2.0.
+
+`sqlStore(client, table?)` from `@absolutejs/rate-limit/postgres` supports host-managed PostgreSQL transactions without requiring Bun SQL. Supply `query(text, params) -> { rows }` and `transaction(callback)`. Its journaled host-owned table has `key text primary key`, `value jsonb`, `expires_at timestamptz`, and `updated_at timestamptz`. Updates and deletes share a PostgreSQL advisory lock. Existing `postgresStore({ sql })` remains available.

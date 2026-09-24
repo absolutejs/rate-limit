@@ -1,5 +1,16 @@
 {
 	"contract": 1,
 	"name": "@absolutejs/rate-limit",
-	"releases": []
+	"releases": [
+		{
+			"changes": [
+				{
+					"kind": "added",
+					"summary": "Add driver-independent PostgreSQL atomic rate-limit storage for host transaction clients"
+				}
+			],
+			"date": "2026-09-24",
+			"version": "0.7.0"
+		}
+	]
 }

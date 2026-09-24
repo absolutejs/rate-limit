@@ -105,3 +105,9 @@ export const postgresStore = (options: PostgresStoreOptions): PostgresStore => {
       }),
   };
 };
+
+export {
+  sqlStore,
+  type RateLimitSqlClient,
+  type RateLimitSql,
+} from "./sqlStore";
