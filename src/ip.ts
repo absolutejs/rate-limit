@@ -25,6 +25,21 @@ export type IpExtractOptions = {
 	 */
 	trustedProxies?: number;
 	/**
+	 * Addresses (CIDRs) the trusted proxies connect from. When set, forwarded
+	 * headers are read only for a connection from one of them; anything else
+	 * is keyed by its own address, so a client that reaches the app directly
+	 * cannot choose its key. Leave unset only when the network already
+	 * guarantees that every connection comes from the proxies.
+	 */
+	trustedProxyCidrs?: readonly string[];
+	/**
+	 * A single-value client-address header a trusted CDN sets (for example
+	 * `cf-connecting-ip`), used instead of `x-forwarded-for`. Any client can
+	 * send such a header, so it is read only when named here, and only for a
+	 * trusted proxy's connection.
+	 */
+	clientIpHeader?: string;
+	/**
 	 * Group IPv6 addresses by this prefix length (bits). Default `64`. Set
 	 * `128` to disable grouping. Has no effect on IPv4.
 	 */
@@ -42,7 +57,17 @@ export const extractIp = (options: IpExtractOptions): string => {
 	const prefix = options.ipv6Prefix ?? 64;
 
 	let candidate: string | null = null;
-	if (trust > 0) {
+	const fromTrustedProxy =
+		trust > 0 &&
+		(options.trustedProxyCidrs === undefined ||
+			(options.connectionIp !== null &&
+				options.trustedProxyCidrs.some((cidr) =>
+					ipInCidr(options.connectionIp as string, cidr),
+				)));
+	if (fromTrustedProxy && options.clientIpHeader) {
+		const value = options.headers.get(options.clientIpHeader)?.trim();
+		candidate = value && value.length > 0 ? value : null;
+	} else if (fromTrustedProxy) {
 		const xff = options.headers.get('x-forwarded-for');
 		if (xff !== null) {
 			const parts = xff.split(',').map((part) => part.trim()).filter((part) => part.length > 0);
@@ -58,14 +83,8 @@ export const extractIp = (options: IpExtractOptions): string => {
 				candidate = parts[0] ?? null;
 			}
 		}
-		// Some CDNs use a single-value header instead (cf-connecting-ip,
-		// fly-client-ip, true-client-ip). Honor any of them; first non-empty wins.
-		if (candidate === null) {
-			for (const name of ['cf-connecting-ip', 'fly-client-ip', 'true-client-ip', 'x-real-ip']) {
-				const value = options.headers.get(name);
-				if (value !== null && value.length > 0) { candidate = value.trim(); break; }
-			}
-		}
+		// CDN single-value headers (cf-connecting-ip, true-client-ip, …) are
+		// not a fallback: any client can send one. Name it as clientIpHeader.
 	}
 
 	const ip = candidate ?? options.connectionIp ?? 'unknown';
@@ -147,4 +166,54 @@ const expandIpv6 = (input: string): string | null => {
 		if (!/^[0-9a-f]{0,4}$/.test(part)) return null;
 		return part.padStart(4, '0');
 	}).join(':');
+};
+
+const ipv4ToBigInt = (ip: string): bigint | null => {
+	const parts = ip.split('.');
+	if (parts.length !== 4) return null;
+	let value = 0n;
+	for (const part of parts) {
+		if (!/^\d{1,3}$/.test(part)) return null;
+		const octet = Number(part);
+		if (octet > 255) return null;
+		value = (value << 8n) | BigInt(octet);
+	}
+
+	return value;
+};
+
+const ipv6ToBigInt = (ip: string): bigint | null => {
+	const halves = ip.toLowerCase().split('::');
+	if (halves.length > 2) return null;
+	const head = halves[0] ? halves[0].split(':') : [];
+	const tail = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+	const missing = 8 - head.length - tail.length;
+	if (halves.length === 1 ? missing !== 0 : missing < 1) return null;
+	const groups = [...head, ...Array<string>(halves.length === 2 ? missing : 0).fill('0'), ...tail];
+	let value = 0n;
+	for (const group of groups) {
+		if (!/^[0-9a-f]{1,4}$/.test(group)) return null;
+		value = (value << 16n) | BigInt(parseInt(group, 16));
+	}
+
+	return value;
+};
+
+/** Whether `ip` (IPv4 or IPv6, an IPv4-mapped IPv6 counts as IPv4) is inside `cidr`. */
+export const ipInCidr = (ip: string, cidr: string): boolean => {
+	const [network, bitsText] = cidr.trim().split('/');
+	if (!network) return false;
+	const address = ip.trim().replace(/^::ffff:(?=\d+\.)/i, '');
+	const v4 = ipv4ToBigInt(address);
+	const networkV4 = ipv4ToBigInt(network);
+	const [value, base, width] =
+		v4 !== null && networkV4 !== null
+			? [v4, networkV4, 32]
+			: [ipv6ToBigInt(address), ipv6ToBigInt(network), 128];
+	if (value === null || base === null) return false;
+	const bits = bitsText === undefined ? width : Number(bitsText);
+	if (!Number.isInteger(bits) || bits < 0 || bits > width) return false;
+	const shift = BigInt(width - bits);
+
+	return value >> shift === base >> shift;
 };

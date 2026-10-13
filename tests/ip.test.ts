@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { extractIp, formatHeaders, normalizeIp } from '../src/core';
+import { extractIp, ipInCidr, formatHeaders, normalizeIp } from '../src/core';
 
 const h = (entries: Record<string, string>): Headers => {
 	const out = new Headers();
@@ -44,13 +44,23 @@ describe('extractIp — XFF trust modes', () => {
 		expect(ip).toBe('1.1.1.1');
 	});
 
-	test('honors cf-connecting-ip when XFF is missing and proxies are trusted', () => {
-		const ip = extractIp({
-			connectionIp: '10.0.0.5',
-			headers: h({ 'cf-connecting-ip': '203.0.113.7' }),
-			trustedProxies: 1,
-		});
-		expect(ip).toBe('203.0.113.7');
+	// Any client can send a CDN header; it used to be a fallback when XFF
+	// was missing, which let a caller pick its own rate-limit key.
+	test('ignores CDN client headers unless one is named', () => {
+		const headers = h({ 'cf-connecting-ip': '203.0.113.7', 'true-client-ip': '198.51.100.1' });
+		expect(extractIp({ connectionIp: '10.0.0.5', headers, trustedProxies: 1 })).toBe('10.0.0.5');
+		expect(
+			extractIp({ clientIpHeader: 'cf-connecting-ip', connectionIp: '10.0.0.5', headers, trustedProxies: 1 }),
+		).toBe('203.0.113.7');
+	});
+
+	test('reads forwarded headers only from a connection inside trustedProxyCidrs', () => {
+		const headers = h({ 'x-forwarded-for': '203.0.113.7' });
+		const options = { headers, trustedProxies: 1, trustedProxyCidrs: ['10.50.0.0/24'] };
+		expect(extractIp({ ...options, connectionIp: '10.50.0.3' })).toBe('203.0.113.7');
+		// A client that reaches the app directly is keyed by its own address.
+		expect(extractIp({ ...options, connectionIp: '198.51.100.9' })).toBe('198.51.100.9');
+		expect(extractIp({ ...options, connectionIp: '::ffff:10.50.0.3' })).toBe('203.0.113.7');
 	});
 
 	test('falls back to "unknown" when nothing identifies the requester', () => {
@@ -160,5 +170,17 @@ describe('formatHeaders', () => {
 			retryAfterSec: 0,
 		});
 		expect(allowed['Retry-After']).toBeUndefined();
+	});
+});
+
+describe('ipInCidr', () => {
+	test('matches IPv4 and IPv6 networks and rejects garbage', () => {
+		expect(ipInCidr('10.50.0.3', '10.50.0.0/24')).toBe(true);
+		expect(ipInCidr('10.50.1.3', '10.50.0.0/24')).toBe(false);
+		expect(ipInCidr('10.50.0.3', '10.50.0.3')).toBe(true);
+		expect(ipInCidr('2001:db8::1', '2001:db8::/32')).toBe(true);
+		expect(ipInCidr('2001:db9::1', '2001:db8::/32')).toBe(false);
+		expect(ipInCidr('not-an-ip', '10.0.0.0/8')).toBe(false);
+		expect(ipInCidr('10.0.0.1', '10.0.0.0/99')).toBe(false);
 	});
 });
