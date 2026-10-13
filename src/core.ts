@@ -19,6 +19,6 @@ export {
 	type TokenBucketOptions,
 } from './algorithms';
 export { memoryStore, type MemoryStoreOptions } from './stores';
-export { extractIp, normalizeIp, type IpExtractOptions } from './ip';
+export { extractIp, ipInCidr, normalizeIp, type IpExtractOptions } from './ip';
 export { formatHeaders, type HeaderMode } from './headers';
 export { combined, type CombinedOptions } from './combined';

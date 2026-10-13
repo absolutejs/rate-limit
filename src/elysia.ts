@@ -58,6 +58,10 @@ export type RateLimitOptions = {
 	 * relevant when `key === 'ip'`. Default `0` (don't trust XFF).
 	 */
 	trustedProxies?: number;
+	/** Where the trusted proxies connect from; see `IpExtractOptions`. */
+	trustedProxyCidrs?: readonly string[];
+	/** A CDN client-address header to trust instead of XFF; see `IpExtractOptions`. */
+	clientIpHeader?: string;
 	/**
 	 * IPv6 prefix length to group by. Default `64`. Only relevant when
 	 * `key === 'ip'`.
@@ -108,6 +112,7 @@ const defaultKeyResolvers = (
 	resolver: KeyResolver,
 	trustedProxies: number,
 	ipv6Prefix: number,
+	proxy: { clientIpHeader?: string; trustedProxyCidrs?: readonly string[] } = {},
 ) => {
 	if (resolver === 'ip') {
 		return (ctx: RateLimitContext) => {
@@ -117,6 +122,8 @@ const defaultKeyResolvers = (
 				headers: ctx.request.headers,
 				ipv6Prefix,
 				trustedProxies,
+				...(proxy.clientIpHeader ? { clientIpHeader: proxy.clientIpHeader } : {}),
+				...(proxy.trustedProxyCidrs ? { trustedProxyCidrs: proxy.trustedProxyCidrs } : {}),
 			});
 		};
 	}
@@ -134,6 +141,10 @@ export const rateLimit = (options: RateLimitOptions) => {
 		options.key ?? 'ip',
 		options.trustedProxies ?? 0,
 		options.ipv6Prefix ?? 64,
+		{
+			...(options.clientIpHeader ? { clientIpHeader: options.clientIpHeader } : {}),
+			...(options.trustedProxyCidrs ? { trustedProxyCidrs: options.trustedProxyCidrs } : {}),
+		},
 	);
 	const skip = options.skip;
 	const onLimit = options.onLimit;
