@@ -157,7 +157,7 @@ export const rateLimit = (options: RateLimitOptions) => {
 	// 0.3.0: OTel tracer (noop when options.tracerProvider unset).
 	const tracer = tracerOrNoop(options.tracerProvider, '@absolutejs/rate-limit');
 
-	return new Elysia({ name: namespace }).request(
+	return new Elysia({ name: namespace }).onRequest(
 		async ({ request, server, set }) => {
 			const rlCtx: RateLimitContext = {
 				request,

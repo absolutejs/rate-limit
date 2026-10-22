@@ -5,6 +5,24 @@
 		{
 			"changes": [
 				{
+					"detail": "Elysia 2.0.0-rc.0 renamed every lifecycle hook to its `on` form and removed setup/cleanup (now onStart/onStop). This package now builds and tests against Elysia 2.0.0-rc.0 and requires `elysia ^2.0.0-rc.0`, which also accepts later release candidates and 2.0.0. Its plugin's hooks are renamed to match.",
+					"kind": "breaking",
+					"migration": {
+						"instruction": "Upgrade `elysia` and every `@elysia/*` package to 2.0.0-rc.0 or later, then rename lifecycle hooks in your own server: request → onRequest, beforeHandle → onBeforeHandle, afterHandle → onAfterHandle, afterResponse → onAfterResponse, error → onError, parse → onParse, transform → onTransform; setup/cleanup → onStart/onStop. absolutejs/scripts codemods/elysia-rc-hooks.ts does the renames (run it before upgrading Elysia).",
+						"manual": true
+					},
+					"summary": "Requires Elysia 2.0.0-rc.0",
+					"symbols": [
+						"rateLimit"
+					]
+				}
+			],
+			"date": "2026-10-22",
+			"version": "0.8.0"
+		},
+		{
+			"changes": [
+				{
 					"detail": "With trustedProxies set and no x-forwarded-for, the IP key fell back to cf-connecting-ip, fly-client-ip, true-client-ip or x-real-ip, which any client can send, so a caller could choose its own rate-limit key. Those headers are no longer read unless one is named as clientIpHeader. trustedProxyCidrs (also on the Elysia plugin) limits forwarded-header trust to connections from the proxies themselves; ipInCidr is exported.",
 					"kind": "security",
 					"summary": "Stop trusting CDN client headers by default; add trustedProxyCidrs and clientIpHeader",
